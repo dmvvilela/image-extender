@@ -1,5 +1,9 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateText, type GeneratedFile, type ModelMessage } from 'ai'
+import {
+  generateText,
+  type GeneratedFile,
+  type ModelMessage,
+} from 'ai'
 import {
   getLanguageModel,
   isMissingApiKeyError,
@@ -26,13 +30,29 @@ export type GenerateImageResult = {
   text: string
 }
 
+/** Image models need a generous output budget; below ~512 tokens Gemini often returns text-only. */
+const DEFAULT_IMAGE_MAX_OUTPUT_TOKENS = 8192
+
 /** Convert a data URL or URL string to AI SDK image content. */
 function toImagePart(url: string): { type: 'image'; image: string } {
   return { type: 'image', image: url }
 }
 
 export function buildUserMessage(parts: ImageContentPart[]): ModelMessage {
-  const content = parts.map((part) => {
+  const textParts = parts.filter(
+    (part): part is { type: 'text'; text: string } => part.type === 'text'
+  )
+  const imageParts = parts.filter(
+    (part): part is { type: 'image'; image: string } => part.type === 'image'
+  )
+
+  // Single-image edit/outpaint: instructions before image (AI SDK cookbook pattern).
+  const ordered =
+    imageParts.length === 1 && textParts.length >= 1
+      ? [...textParts, ...imageParts]
+      : [...imageParts, ...textParts]
+
+  const content = ordered.map((part) => {
     if (part.type === 'text') {
       return { type: 'text' as const, text: part.text }
     }
@@ -55,6 +75,26 @@ function fileToDataUrl(file: GeneratedFile): string | null {
   return null
 }
 
+function isImageFile(file: GeneratedFile): boolean {
+  const mediaType = file.mediaType?.toLowerCase() ?? ''
+  if (mediaType.startsWith('image/')) return true
+  // Gemini occasionally omits a proper image/* media type on inline image bytes.
+  return (file.uint8Array?.length ?? 0) > 1024
+}
+
+type TextResultWithFiles = {
+  files?: GeneratedFile[]
+  steps?: Array<{ files?: GeneratedFile[] }>
+  finishReason?: string
+  text: string
+}
+
+function collectFilesFromResult(result: TextResultWithFiles): GeneratedFile[] {
+  const stepFiles = result.steps?.flatMap((step) => step.files ?? []) ?? []
+  if (stepFiles.length > 0) return stepFiles
+  return result.files ?? []
+}
+
 function imageFromToolResults(
   staticToolResults: Array<{ toolName: string; output: unknown }>
 ): string | null {
@@ -70,6 +110,27 @@ function imageFromToolResults(
   return null
 }
 
+function noImageGeneratedError(
+  provider: 'google' | 'openai',
+  modelId: string,
+  result: Pick<TextResultWithFiles, 'finishReason' | 'text'>
+): Error {
+  const modelText = result.text?.trim()
+  const detail = modelText
+    ? ` The model replied: "${modelText.slice(0, 280)}${modelText.length > 280 ? '…' : ''}"`
+    : ''
+  const finish = result.finishReason ? ` (finish: ${result.finishReason})` : ''
+
+  if (provider === 'google') {
+    return new Error(
+      `No image generated from ${modelId}${finish}.${detail} Try again, simplify the prompt, or switch models.`
+    )
+  }
+  return new Error(
+    `No image generated from OpenAI model (${modelId})${finish}.${detail} Try a Gemini model for image editing.`
+  )
+}
+
 export async function generateImageFromParts(
   options: GenerateImageOptions
 ): Promise<GenerateImageResult> {
@@ -80,10 +141,10 @@ export async function generateImageFromParts(
     parts,
     aspectRatio,
     temperature,
-    maxOutputTokens = 2000,
+    maxOutputTokens = DEFAULT_IMAGE_MAX_OUTPUT_TOKENS,
   } = options
 
-  const { model: languageModel, provider } = getLanguageModel(
+  const { model: languageModel, provider, modelId } = getLanguageModel(
     model,
     apiKeys,
     legacyApiKey
@@ -92,28 +153,39 @@ export async function generateImageFromParts(
   const userMessage = buildUserMessage(parts)
 
   if (provider === 'google') {
-    const result = await generateText({
-      model: languageModel,
-      messages: [userMessage],
-      maxOutputTokens,
-      temperature,
-      providerOptions: {
-        google: {
-          responseModalities: ['TEXT', 'IMAGE'],
-          ...(aspectRatio
-            ? { imageConfig: { aspectRatio } }
-            : {}),
-        },
-      },
-    })
+    let lastResult: TextResultWithFiles | null = null
 
-    const imageUrl = firstImageFromFiles(result.files)
-    if (!imageUrl) {
-      throw new Error(
-        'No image generated. The model responded without image output.'
-      )
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await generateText({
+        model: languageModel,
+        messages: [userMessage],
+        maxOutputTokens,
+        temperature:
+          attempt === 0
+            ? temperature
+            : Math.min(1, (temperature ?? 0.5) + 0.25),
+        providerOptions: {
+          google: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            ...(aspectRatio
+              ? { imageConfig: { aspectRatio } }
+              : {}),
+          },
+        },
+      })
+      lastResult = result
+
+      const imageUrl = firstImageFromFiles(collectFilesFromResult(result))
+      if (imageUrl) {
+        return { imageUrl, text: result.text }
+      }
     }
-    return { imageUrl, text: result.text }
+
+    throw noImageGeneratedError(
+      'google',
+      modelId,
+      lastResult ?? { finishReason: 'unknown', text: '' }
+    )
   }
 
   // OpenAI image models — multimodal chat with the image generation tool.
@@ -122,7 +194,6 @@ export async function generateImageFromParts(
     throw new Error('OpenAI API key missing.')
   }
   const openai = createOpenAI({ apiKey })
-  const { modelId } = getLanguageModel(model, apiKeys, legacyApiKey)
 
   const result = await generateText({
     model: languageModel,
@@ -140,12 +211,10 @@ export async function generateImageFromParts(
 
   let imageUrl =
     imageFromToolResults(result.staticToolResults) ||
-    firstImageFromFiles(result.files)
+    firstImageFromFiles(collectFilesFromResult(result))
 
   if (!imageUrl) {
-    throw new Error(
-      `No image generated from OpenAI model (${modelId}). Try a Gemini model for image editing.`
-    )
+    throw noImageGeneratedError('openai', modelId, result)
   }
 
   return { imageUrl, text: result.text }
@@ -155,8 +224,9 @@ export function firstImageFromFiles(
   files: GeneratedFile[] | undefined
 ): string | null {
   if (!files?.length) return null
-  for (const file of files) {
-    if (!file.mediaType?.startsWith('image/')) continue
+  for (let i = files.length - 1; i >= 0; i--) {
+    const file = files[i]
+    if (!isImageFile(file)) continue
     const url = fileToDataUrl(file)
     if (url) return url
   }
