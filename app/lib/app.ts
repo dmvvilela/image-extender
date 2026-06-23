@@ -69,6 +69,15 @@ export function hasAnyStoredApiKey(keys: StoredApiKeys): boolean {
   return !!(keys.google.trim() || keys.openai.trim())
 }
 
+export type ServerEnvKeys = {
+  google: boolean
+  openai: boolean
+}
+
+export function hasServerEnvKey(env: ServerEnvKeys, provider: 'google' | 'openai'): boolean {
+  return provider === 'google' ? env.google : env.openai
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline icons — minimal SVG primitives, zero dependencies
 // ─────────────────────────────────────────────────────────────────────────────

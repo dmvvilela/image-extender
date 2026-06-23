@@ -11,7 +11,7 @@ import { TileStudio } from '@/app/components/TileStudio'
 import { TopBar } from '@/app/components/TopBar'
 import { ResultActions, VariantSelector } from '@/app/components/VariantSelector'
 import { Workspace } from '@/app/components/Workspace'
-import { Candidate, Direction, EXTENSION_PERCENT, Mode, STORAGE_KEY, STORAGE_KEY_GOOGLE, STORAGE_KEY_OPENAI, STORAGE_MODE, STORAGE_MODEL, StoredApiKeys, apiKeysPayload, hasAnyStoredApiKey } from '@/app/lib/app'
+import { Candidate, Direction, EXTENSION_PERCENT, Mode, STORAGE_KEY, STORAGE_KEY_GOOGLE, STORAGE_KEY_OPENAI, STORAGE_MODE, STORAGE_MODEL, StoredApiKeys, ServerEnvKeys, apiKeysPayload, hasAnyStoredApiKey, hasServerEnvKey } from '@/app/lib/app'
 import { findStyleLabel } from '@/app/lib/artStyles'
 import { DEFAULT_MODEL, MODELS, getModelConfig, getProviderForModel, skipsArtDirectorReview } from '@/app/lib/models'
 import { LAYER_ORDER, LAYER_ROLES, LayerRole, PARALLAX_MAX_AUTO_STEPS, ParallaxLayer, WORKFLOW_ORDER, createDefaultLayers, getRecommendedLayerIndex, getWorkflowPrerequisite } from '@/app/lib/parallax'
@@ -191,6 +191,7 @@ export default function Home() {
   // BYOK: API key + model are persisted to localStorage. We start in a
   // "hydrating" state so we don't flash the modal before reading storage.
   const [apiKeys, setApiKeys] = useState<StoredApiKeys>({ google: '', openai: '' })
+  const [serverEnvKeys, setServerEnvKeys] = useState<ServerEnvKeys>({ google: false, openai: false })
   const [apiKeyModalProvider, setApiKeyModalProvider] = useState<'google' | 'openai'>('google')
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_MODEL)
   const skipArtDirectorReview = skipsArtDirectorReview(selectedModel)
@@ -202,46 +203,84 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Hydrate from localStorage on mount, and decide whether to show the modal.
+  // Hydrate from localStorage on mount; probe server env so .env users aren't prompted.
   useEffect(() => {
-    try {
-      let google = localStorage.getItem(STORAGE_KEY_GOOGLE) || ''
-      let openai = localStorage.getItem(STORAGE_KEY_OPENAI) || ''
-      const legacy = localStorage.getItem(STORAGE_KEY) || ''
-      if (legacy && !google && !openai) {
-        if (legacy.startsWith('sk-') && !legacy.startsWith('sk-or-')) {
-          openai = legacy
-        } else if (!legacy.startsWith('sk-or-')) {
-          google = legacy
+    let cancelled = false
+
+    async function hydrate() {
+      let google = ''
+      let openai = ''
+      let envKeys: ServerEnvKeys = { google: false, openai: false }
+
+      try {
+        google = localStorage.getItem(STORAGE_KEY_GOOGLE) || ''
+        openai = localStorage.getItem(STORAGE_KEY_OPENAI) || ''
+        const legacy = localStorage.getItem(STORAGE_KEY) || ''
+        if (legacy && !google && !openai) {
+          if (legacy.startsWith('sk-') && !legacy.startsWith('sk-or-')) {
+            openai = legacy
+          } else if (!legacy.startsWith('sk-or-')) {
+            google = legacy
+          }
+          localStorage.removeItem(STORAGE_KEY)
         }
-        localStorage.removeItem(STORAGE_KEY)
+        const m = localStorage.getItem(STORAGE_MODEL) || ''
+        const savedMode = localStorage.getItem(STORAGE_MODE) || ''
+        if (!cancelled) {
+          setApiKeys({ google, openai })
+          if (m && MODELS.some((mm) => mm.value === m)) {
+            setSelectedModel(m)
+          }
+          if (
+            savedMode === 'parallax' ||
+            savedMode === 'extender' ||
+            savedMode === 'tile' ||
+            savedMode === 'sprite' ||
+            savedMode === 'props'
+          ) {
+            setModeState(savedMode)
+          }
+        }
+      } catch {
+        // localStorage unavailable — fall through to env probe + maybe modal.
       }
-      const m = localStorage.getItem(STORAGE_MODEL) || ''
-      const savedMode = localStorage.getItem(STORAGE_MODE) || ''
-      setApiKeys({ google, openai })
-      if (m && MODELS.some((mm) => mm.value === m)) {
-        setSelectedModel(m)
+
+      try {
+        const res = await fetch('/api/config')
+        if (res.ok) {
+          const data = await res.json()
+          if (data?.envKeys && typeof data.envKeys === 'object') {
+            envKeys = {
+              google: !!data.envKeys.google,
+              openai: !!data.envKeys.openai,
+            }
+          }
+        }
+      } catch {
+        // Server probe failed — treat as no env keys.
       }
+
+      if (cancelled) return
+
+      setServerEnvKeys(envKeys)
+
+      const stored = { google, openai }
       if (
-        savedMode === 'parallax' ||
-        savedMode === 'extender' ||
-        savedMode === 'tile' ||
-        savedMode === 'sprite' ||
-        savedMode === 'props'
+        !hasAnyStoredApiKey(stored) &&
+        !envKeys.google &&
+        !envKeys.openai
       ) {
-        setModeState(savedMode)
-      }
-      if (!hasAnyStoredApiKey({ google, openai })) {
         setApiKeyModalProvider('google')
         setApiKeyRequired(true)
         setShowApiKeyModal(true)
       }
-    } catch {
-      setApiKeyModalProvider('google')
-      setApiKeyRequired(true)
-      setShowApiKeyModal(true)
-    } finally {
+
       setHydrated(true)
+    }
+
+    hydrate()
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -294,7 +333,9 @@ export default function Home() {
 
   const hasKeyForSelectedModel = (): boolean => {
     const provider = getProviderForModel(selectedModel)
-    return provider === 'google' ? !!apiKeys.google.trim() : !!apiKeys.openai.trim()
+    if (provider === 'google' && apiKeys.google.trim()) return true
+    if (provider === 'openai' && apiKeys.openai.trim()) return true
+    return hasServerEnvKey(serverEnvKeys, provider)
   }
 
   const ensureCanGenerate = (): boolean => {
