@@ -12,6 +12,8 @@ AI-generated pixels, plus purpose-built pipelines for tiles, sprites, and props.
 Bring your own API keys (Google AI Studio and/or OpenAI) — they stay in your browser, never on the
 server.
 
+Forked from [boona13/image-extender](https://github.com/boona13/image-extender).
+
 ![A 1024² portrait shot extended into a cinematic wide-angle scene with no visible seam](docs/screenshots/after.png)
 
 ## Before / After
@@ -342,7 +344,7 @@ enough that 1 attempt usually suffices.
 ## Quick start
 
 ```bash
-git clone https://github.com/boona13/image-extender.git
+git clone https://github.com/dmvvilela/image-extender.git
 cd image-extender
 pnpm install
 pnpm dev
