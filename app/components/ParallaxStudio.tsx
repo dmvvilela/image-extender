@@ -551,17 +551,17 @@ export function LayerPanel({
 export function LayerEmptyState({
   layer,
   layers,
-  onPickFile,
   onGenerate,
   onDropFile,
   onGoToPrerequisite,
+  inputResetKey = 0,
 }: {
   layer: ParallaxLayer
   layers: ParallaxLayer[]
-  onPickFile: () => void
   onGenerate: () => void
   onDropFile: (file: File) => void
   onGoToPrerequisite: (idx: number) => void
+  inputResetKey?: number
 }) {
   const [drag, setDrag] = useState(false)
   const spec = LAYER_ROLES[layer.role]
@@ -628,7 +628,6 @@ export function LayerEmptyState({
           <span style={{ color: 'var(--text-muted)' }}>{spec.hint}</span>
         </div>
         <div
-          onClick={onPickFile}
           onDragOver={(e) => {
             e.preventDefault()
             setDrag(true)
@@ -648,6 +647,18 @@ export function LayerEmptyState({
             background: drag ? 'var(--accent-bg)' : 'var(--bg-elev)',
           }}
         >
+          <input
+            key={inputResetKey}
+            type="file"
+            accept="image/*"
+            aria-label={`Drop a ${spec.short.toLowerCase()} layer`}
+            className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) onDropFile(file)
+            }}
+          />
+          <div className="pointer-events-none">
           <div
             className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full transition-transform group-hover:scale-110"
             style={{
@@ -672,6 +683,7 @@ export function LayerEmptyState({
               ? 'PNG, JPG, or WEBP — opaque image at this game height'
               : 'PNG with transparency works best — the magenta key will be applied if needed'}
           </p>
+          </div>
         </div>
         <div className="mt-3 flex items-center justify-center gap-2 text-[12px]">
           <span style={{ color: 'var(--text-muted)' }}>or</span>
@@ -727,7 +739,7 @@ export function ParallaxStudio({
   onDownloadActiveLayerPng,
   onExportZip,
   // Empty-state actions for the active layer
-  onPickFile,
+  inputResetKey,
   onGenerate,
   onDropFile,
 }: {
@@ -755,7 +767,7 @@ export function ParallaxStudio({
   onHarmonize: () => void
   onDownloadActiveLayerPng: () => void
   onExportZip: () => void
-  onPickFile: () => void
+  inputResetKey?: number
   onGenerate: () => void
   onDropFile: (f: File) => void
 }) {
@@ -816,7 +828,7 @@ export function ParallaxStudio({
           <LayerEmptyState
             layer={activeLayer}
             layers={layers}
-            onPickFile={onPickFile}
+            inputResetKey={inputResetKey}
             onGenerate={onGenerate}
             onDropFile={onDropFile}
             onGoToPrerequisite={setActiveIdx}

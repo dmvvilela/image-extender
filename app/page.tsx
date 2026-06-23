@@ -200,8 +200,7 @@ export default function Home() {
   // Required-mode means the user can't dismiss the modal (first run, no key
   // anywhere). Optional-mode is used when editing an existing key from settings.
   const [apiKeyRequired, setApiKeyRequired] = useState(false)
-
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadResetKey, setUploadResetKey] = useState(0)
 
   // Hydrate from localStorage on mount; probe server env so .env users aren't prompted.
   useEffect(() => {
@@ -559,11 +558,6 @@ export default function Home() {
     },
     [mode, applyImageToActiveLayer, loadDataUrlAsImage]
   )
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) handleFile(file)
-  }
 
   // ── Generate from scratch ──────────────────────────────────────────────────
 
@@ -1022,7 +1016,7 @@ export default function Home() {
       setSpriteProgressMsg(null)
       spriteStopRef.current = false
     }
-    if (fileInputRef.current) fileInputRef.current.value = ''
+    setUploadResetKey((k) => k + 1)
   }
 
   // ── Tile-set mode handlers ───────────────────────────────────────────────
@@ -3986,14 +3980,14 @@ export default function Home() {
           onHarmonize={handleHarmonizeActiveLayer}
           onDownloadActiveLayerPng={handleDownloadFull}
           onExportZip={handleExportZip}
-          onPickFile={() => fileInputRef.current?.click()}
+          inputResetKey={uploadResetKey}
           onGenerate={openGenerateModal}
           onDropFile={handleFile}
         />
       ) : !displayImage ? (
         <EmptyState
           mode={mode}
-          onPickFile={() => fileInputRef.current?.click()}
+          inputResetKey={uploadResetKey}
           onGenerate={openGenerateModal}
           onDropFile={handleFile}
         />
@@ -4050,14 +4044,6 @@ export default function Home() {
           />
         )}
 
-      {/* Hidden file input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handleImageUpload}
-        className="hidden"
-      />
 
       <SettingsDrawer
         open={showSettings}

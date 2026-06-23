@@ -687,21 +687,7 @@ export function SpriteStudio({
 
           {/* Upload drop-zone — drag & drop or click. Primary path for users
               who already have a character asset. */}
-          <input
-            ref={uploadInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) onUploadCharacter(file)
-              e.target.value = ''
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => !generating && uploadInputRef.current?.click()}
-            disabled={generating}
+          <div
             onDragOver={(e) => {
               if (generating) return
               e.preventDefault()
@@ -715,7 +701,7 @@ export function SpriteStudio({
               const file = e.dataTransfer.files?.[0]
               if (file) onUploadCharacter(file)
             }}
-            className="group flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3.5 py-3 text-left transition-colors"
+            className="group relative flex w-full items-center gap-3 rounded-[var(--radius-md)] px-3.5 py-3 text-left transition-colors"
             style={{
               border: `1.5px dashed ${
                 dragOver ? 'var(--accent)' : 'var(--border-strong)'
@@ -726,6 +712,20 @@ export function SpriteStudio({
             }}
             title="Upload your own character image and animate it instead of generating one"
           >
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="image/*"
+              aria-label="Upload your own character"
+              className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+              disabled={generating}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) onUploadCharacter(file)
+                e.target.value = ''
+              }}
+            />
+            <div className="pointer-events-none flex w-full items-center gap-3">
             <span
               className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-colors"
               style={{
@@ -752,7 +752,8 @@ export function SpriteStudio({
                 Drag &amp; drop or click to browse · transparent PNG works best
               </span>
             </span>
-          </button>
+            </div>
+          </div>
 
           {/* Remove uploaded character — lets the user drop the upload and go
               back to a starter preset or their own prompt. */}
