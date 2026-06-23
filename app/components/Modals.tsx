@@ -3,7 +3,64 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icons } from '@/app/components/icons'
 import { ART_STYLE_GROUPS } from '@/app/lib/artStyles'
-import { MODELS, maskKey } from '@/app/lib/models'
+import type { StoredApiKeys } from '@/app/lib/app'
+import { MODELS, maskKey, type AiProvider } from '@/app/lib/models'
+
+function providerLabel(provider: AiProvider): string {
+  return provider === 'google' ? 'Google AI' : 'OpenAI'
+}
+
+function KeyRow({
+  label,
+  keyValue,
+  onEdit,
+  onClear,
+}: {
+  label: string
+  keyValue: string
+  onEdit: () => void
+  onClear: () => void
+}) {
+  if (!keyValue) {
+    return (
+      <button onClick={onEdit} className="btn btn-secondary w-full justify-start">
+        <Icons.Key size={14} />
+        Add {label} key
+      </button>
+    )
+  }
+  return (
+    <div
+      className="flex items-center gap-3 rounded-[var(--radius-sm)] p-3"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded"
+        style={{ background: 'var(--accent-bg)', color: 'var(--accent)' }}
+      >
+        <Icons.Key size={14} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] font-medium">{label} key saved</div>
+        <div
+          className="truncate font-mono text-[11px]"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          {maskKey(keyValue)}
+        </div>
+      </div>
+      <button onClick={onEdit} className="icon-btn" aria-label={`Edit ${label} key`}>
+        <Icons.Settings size={14} />
+      </button>
+      <button onClick={onClear} className="icon-btn" aria-label={`Remove ${label} key`}>
+        <Icons.Trash size={14} />
+      </button>
+    </div>
+  )
+}
 
 export function SettingsDrawer({
   open,
@@ -11,7 +68,7 @@ export function SettingsDrawer({
   debugMode,
   setDebugMode,
   onGenerate,
-  apiKey,
+  apiKeys,
   onEditApiKey,
   onClearApiKey,
   selectedModel,
@@ -22,9 +79,9 @@ export function SettingsDrawer({
   debugMode: boolean
   setDebugMode: (v: boolean) => void
   onGenerate: () => void
-  apiKey: string
-  onEditApiKey: () => void
-  onClearApiKey: () => void
+  apiKeys: StoredApiKeys
+  onEditApiKey: (provider: AiProvider) => void
+  onClearApiKey: (provider: AiProvider) => void
   selectedModel: string
   setSelectedModel: (v: string) => void
 }) {
@@ -107,65 +164,39 @@ export function SettingsDrawer({
             </div>
           </Section>
 
-          <Section title="OpenRouter key">
-            {apiKey ? (
-              <div
-                className="flex items-center gap-3 rounded-[var(--radius-sm)] p-3"
-                style={{
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                <div
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded"
-                  style={{ background: 'var(--accent-bg)', color: 'var(--accent)' }}
-                >
-                  <Icons.Key size={14} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-medium">Key saved locally</div>
-                  <div
-                    className="truncate font-mono text-[11px]"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    {maskKey(apiKey)}
-                  </div>
-                </div>
-                <button
-                  onClick={onEditApiKey}
-                  className="icon-btn"
-                  aria-label="Edit key"
-                  title="Edit key"
-                >
-                  <Icons.Settings size={14} />
-                </button>
-                <button
-                  onClick={onClearApiKey}
-                  className="icon-btn"
-                  aria-label="Remove key"
-                  title="Remove key"
-                >
-                  <Icons.Trash size={14} />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={onEditApiKey}
-                className="btn btn-secondary w-full justify-start"
-              >
-                <Icons.Key size={14} />
-                Add OpenRouter key
-              </button>
-            )}
+          <Section title="API keys">
+            <div className="space-y-2">
+              <KeyRow
+                label="Google AI"
+                keyValue={apiKeys.google}
+                onEdit={() => onEditApiKey('google')}
+                onClear={() => onClearApiKey('google')}
+              />
+              <KeyRow
+                label="OpenAI"
+                keyValue={apiKeys.openai}
+                onEdit={() => onEditApiKey('openai')}
+                onClear={() => onClearApiKey('openai')}
+              />
+            </div>
             <p className="mt-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
-              Stored only in this browser. Get one at{' '}
+              Stored only in this browser. Google keys from{' '}
               <a
-                href="https://openrouter.ai/keys"
+                href="https://aistudio.google.com/apikey"
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--accent)' }}
               >
-                openrouter.ai/keys
+                AI Studio
+              </a>
+              ; OpenAI keys from{' '}
+              <a
+                href="https://platform.openai.com/api-keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--accent)' }}
+              >
+                platform.openai.com
               </a>
               .
             </p>
@@ -517,6 +548,7 @@ export function GenerateModal({
 
 export function ApiKeyModal({
   open,
+  provider,
   initialValue,
   required,
   onSave,
@@ -524,6 +556,7 @@ export function ApiKeyModal({
   onClose,
 }: {
   open: boolean
+  provider: AiProvider
   initialValue: string
   /** If true, the user can't dismiss without entering a key (no Skip / Esc). */
   required: boolean
@@ -553,7 +586,19 @@ export function ApiKeyModal({
   if (!open) return null
 
   const trimmed = value.trim()
-  const looksValid = trimmed.startsWith('sk-or-') && trimmed.length > 20
+  const looksValid =
+    provider === 'google'
+      ? trimmed.length > 20 && !trimmed.startsWith('sk-or-')
+      : trimmed.startsWith('sk-') && !trimmed.startsWith('sk-or-') && trimmed.length > 20
+
+  const label = providerLabel(provider)
+  const placeholder = provider === 'google' ? 'AIza...' : 'sk-...'
+  const helpUrl =
+    provider === 'google'
+      ? 'https://aistudio.google.com/apikey'
+      : 'https://platform.openai.com/api-keys'
+  const helpLabel =
+    provider === 'google' ? 'aistudio.google.com/apikey' : 'platform.openai.com/api-keys'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 anim-fade">
@@ -581,10 +626,10 @@ export function ApiKeyModal({
           </div>
           <div className="flex-1">
             <h2 className="text-[15px] font-semibold tracking-tight">
-              {required ? 'Add your OpenRouter key' : 'OpenRouter API key'}
+              {required ? `Add your ${label} key` : `${label} API key`}
             </h2>
             <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-              Required to generate or extend images.
+              Required to generate or extend images with {label} models.
             </p>
           </div>
           {!required && (
@@ -606,7 +651,7 @@ export function ApiKeyModal({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && looksValid) onSave(trimmed)
               }}
-              placeholder="sk-or-..."
+              placeholder={placeholder}
               className="field pr-10 font-mono text-[13px]"
             />
             <button
@@ -625,7 +670,12 @@ export function ApiKeyModal({
               style={{ color: 'var(--danger)' }}
             >
               <Icons.AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>OpenRouter keys start with <code className="font-mono">sk-or-</code>.</span>
+              <span>
+                {provider === 'google'
+                  ? 'Google AI Studio keys usually start with'
+                  : 'OpenAI keys start with'}{' '}
+                <code className="font-mono">{provider === 'google' ? 'AIza' : 'sk-'}</code>.
+              </span>
             </div>
           )}
         </div>
@@ -639,17 +689,17 @@ export function ApiKeyModal({
           }}
         >
           Your key is stored only in this browser&apos;s <code className="font-mono">localStorage</code>.
-          It&apos;s sent with each request to your local server, which proxies it to OpenRouter — never logged, never persisted server-side.
+          It&apos;s sent with each request to your local server, which proxies it to {label} — never logged, never persisted server-side.
         </div>
 
         <a
-          href="https://openrouter.ai/keys"
+          href={helpUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="mb-5 inline-flex items-center gap-1.5 text-[12px] transition-colors"
           style={{ color: 'var(--accent)' }}
         >
-          Get a key at openrouter.ai/keys
+          Get a key at {helpLabel}
           <Icons.External size={11} />
         </a>
 

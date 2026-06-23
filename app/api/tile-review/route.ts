@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  apiKeyErrorResponse,
+  generateTextCompletion,
+  parseApiKeys,
+} from '@/app/lib/ai/text'
 
 // QA ART DIRECTOR — the review half of the reverse two-call tile pipeline.
-//
-// The image model paints a tileset first; we composite it into a platform
-// PREVIEW (and attach the raw sheet) and hand both to a *vision* model here.
-// Its job is to judge the assembled result like a picky art director: are
-// there visible seams where tiles meet, lighting/palette mismatches between
-// neighbours, broken silhouettes, magenta/pink fringe, blurry or off-style
-// tiles? If it's clean it APPROVES; otherwise it returns a concise fix report
-// that the image model uses to repaint. This catches the cohesion problems a
-// single blind generation can't see.
-const DEFAULT_MODEL = 'google/gemini-2.0-flash-001'
 
 interface Review {
   ok: boolean
@@ -51,8 +46,9 @@ function parseReview(raw: string): Review | null {
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, sceneBrief, apiKey, model, previewImage, sheetImage } =
-      await request.json()
+    const body = await request.json()
+    const { prompt, sceneBrief, apiKey, previewImage, sheetImage } = body
+    const apiKeys = parseApiKeys(body)
 
     if (
       typeof previewImage !== 'string' ||
@@ -63,21 +59,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-
-    const openRouterKey =
-      typeof apiKey === 'string' && apiKey.trim()
-        ? apiKey.trim()
-        : process.env.OPENROUTER_API_KEY
-
-    if (!openRouterKey) {
-      return NextResponse.json(
-        { error: 'OpenRouter API key missing. Add one in Settings.' },
-        { status: 401 }
-      )
-    }
-
-    const modelId =
-      typeof model === 'string' && model.trim() ? model.trim() : DEFAULT_MODEL
 
     const systemPrompt = `You are a SENIOR ENVIRONMENT / TILESET ARTIST doing the final QA pass on a generated 2D-platformer tileset before it ships into the engine. You have the authority to REJECT work, and the experience to not nitpick natural hand-painted texture.
 
@@ -124,60 +105,31 @@ Review the attached platform preview${
         : ''
     } and return your verdict as strict JSON.`
 
-    const content: Array<Record<string, unknown>> = [
-      { type: 'image_url', image_url: { url: previewImage } },
-    ]
+    const userContent: Array<
+      { type: 'image'; image: string } | { type: 'text'; text: string }
+    > = [{ type: 'image', image: previewImage }]
     if (typeof sheetImage === 'string' && sheetImage.startsWith('data:image/')) {
-      content.push({ type: 'image_url', image_url: { url: sheetImage } })
+      userContent.push({ type: 'image', image: sheetImage })
     }
-    content.push({ type: 'text', text: userText })
+    userContent.push({ type: 'text', text: userText })
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': request.headers.get('referer') || 'http://localhost:3000',
-        'X-Title': 'AI Image Extender - Tile QA',
-      },
-      body: JSON.stringify({
-        model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content },
-        ],
-        max_tokens: 600,
-        // Low temperature: this is a judgment call, we want consistency.
-        temperature: 0.2,
-      }),
+    const text = await generateTextCompletion({
+      apiKeys,
+      legacyApiKey: typeof apiKey === 'string' ? apiKey : undefined,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+      maxOutputTokens: 600,
+      temperature: 0.2,
     })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json(
-        { error: errorData.error?.message || 'Failed to review tileset' },
-        { status: response.status }
-      )
-    }
-
-    const data = await response.json()
-    const raw = data.choices?.[0]?.message?.content
-    const text =
-      typeof raw === 'string'
-        ? raw
-        : Array.isArray(raw)
-          ? raw
-              .map((p: { text?: string }) => (typeof p?.text === 'string' ? p.text : ''))
-              .join('')
-          : ''
 
     const review = parseReview(text)
     if (!review) {
-      // Don't block the user on a parse failure — treat as approved.
       return NextResponse.json({ ok: true, issues: [], fix: '' })
     }
     return NextResponse.json(review)
   } catch (error) {
+    const keyResp = apiKeyErrorResponse(error)
+    if (keyResp) return keyResp
     console.error('Error in tile-review route:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },

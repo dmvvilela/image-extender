@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const DEFAULT_MODEL = 'google/gemini-2.0-flash-001'
+import {
+  apiKeyErrorResponse,
+  generateTextCompletion,
+  parseApiKeys,
+} from '@/app/lib/ai/text'
 
 const artStyleDescriptions: Record<string, string> = {
   cinematic: 'cinematic photography with dramatic lighting and film grain',
@@ -24,7 +27,9 @@ const artStyleDescriptions: Record<string, string> = {
 
 export async function POST(request: NextRequest) {
   try {
-    const { anchorPrompt, artStyle, apiKey, model } = await request.json()
+    const body = await request.json()
+    const { anchorPrompt, artStyle, apiKey } = body
+    const apiKeys = parseApiKeys(body)
 
     if (!anchorPrompt || typeof anchorPrompt !== 'string' || !anchorPrompt.trim()) {
       return NextResponse.json(
@@ -32,21 +37,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-
-    const openRouterKey =
-      typeof apiKey === 'string' && apiKey.trim()
-        ? apiKey.trim()
-        : process.env.OPENROUTER_API_KEY
-
-    if (!openRouterKey) {
-      return NextResponse.json(
-        { error: 'OpenRouter API key missing. Add one in Settings.' },
-        { status: 401 }
-      )
-    }
-
-    const modelId =
-      typeof model === 'string' && model.trim() ? model.trim() : DEFAULT_MODEL
 
     const styleLine =
       artStyle && artStyleDescriptions[artStyle]
@@ -67,46 +57,14 @@ Rules for your brief:
 
 Write the shared scene brief for all parallax layers.`
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': request.headers.get('referer') || 'http://localhost:3000',
-        'X-Title': 'AI Image Extender - Scene Brief',
-      },
-      body: JSON.stringify({
-        model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        max_tokens: 400,
-        temperature: 0.4,
-      }),
+    const sceneBrief = await generateTextCompletion({
+      apiKeys,
+      legacyApiKey: typeof apiKey === 'string' ? apiKey : undefined,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      maxOutputTokens: 400,
+      temperature: 0.4,
     })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json(
-        { error: errorData.error?.message || 'Failed to generate scene brief' },
-        { status: response.status }
-      )
-    }
-
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content
-    const sceneBrief =
-      typeof content === 'string'
-        ? content.trim()
-        : Array.isArray(content)
-          ? content
-              .map((p: { text?: string; type?: string }) =>
-                typeof p?.text === 'string' ? p.text : ''
-              )
-              .join('')
-              .trim()
-          : ''
 
     if (!sceneBrief) {
       return NextResponse.json(
@@ -117,6 +75,8 @@ Write the shared scene brief for all parallax layers.`
 
     return NextResponse.json({ sceneBrief })
   } catch (error) {
+    const keyResp = apiKeyErrorResponse(error)
+    if (keyResp) return keyResp
     console.error('Error in scene-brief route:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },

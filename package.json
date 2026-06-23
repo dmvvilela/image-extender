@@ -2,13 +2,15 @@
   "name": "image-extender",
   "version": "1.0.0",
   "private": true,
-  "description": "A web app that extends images in any direction using AI (Gemini via OpenRouter), with Poisson-blended seamless outpainting and a best-of-N variant picker.",
+  "packageManager": "pnpm@11.5.2",
+  "description": "A web app that extends images in any direction using AI (Gemini & OpenAI via Vercel AI SDK), with Poisson-blended seamless outpainting and a best-of-N variant picker.",
   "keywords": [
     "ai",
     "image-extender",
     "outpainting",
-    "openrouter",
     "gemini",
+    "openai",
+    "ai-sdk",
     "nano-banana",
     "poisson-blending",
     "nextjs",
@@ -31,6 +33,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.83",
+    "@ai-sdk/openai": "^3.0.73",
+    "ai": "^6.0.208",
     "jszip": "^3.10.1",
     "next": "^14.0.0",
     "react": "^18.2.0",

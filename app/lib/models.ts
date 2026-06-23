@@ -1,7 +1,13 @@
 'use client'
 
+export type AiProvider = 'google' | 'openai'
+
 export type ModelOption = {
+  /** Stable id used in UI / localStorage (keeps OpenRouter-style slugs for familiarity). */
   value: string
+  /** Native model id passed to @ai-sdk/google or @ai-sdk/openai. */
+  modelId: string
+  provider: AiProvider
   label: string
   hint?: string
   /**
@@ -14,10 +20,11 @@ export type ModelOption = {
   approxSecondsPerCall: number
 }
 
-
 export const MODELS: ModelOption[] = [
   {
     value: 'openai/gpt-5.4-image-2',
+    modelId: 'gpt-5.4-image-2',
+    provider: 'openai',
     label: 'GPT-5.4 Image 2',
     hint: 'OpenAI · high fidelity · slower',
     maxAttempts: 1,
@@ -25,6 +32,8 @@ export const MODELS: ModelOption[] = [
   },
   {
     value: 'google/gemini-3-pro-image-preview',
+    modelId: 'gemini-3-pro-image-preview',
+    provider: 'google',
     label: 'Gemini 3 Pro Image',
     hint: 'Nano Banana Pro · highest fidelity',
     maxAttempts: 1,
@@ -32,6 +41,8 @@ export const MODELS: ModelOption[] = [
   },
   {
     value: 'google/gemini-3.1-flash-image-preview',
+    modelId: 'gemini-3.1-flash-image-preview',
+    provider: 'google',
     label: 'Gemini 3 Flash Image',
     hint: 'Nano Banana 2 · fast · default',
     maxAttempts: 3,
@@ -39,6 +50,8 @@ export const MODELS: ModelOption[] = [
   },
   {
     value: 'google/gemini-2.5-flash-image',
+    modelId: 'gemini-2.5-flash-image',
+    provider: 'google',
     label: 'Gemini 2.5 Flash Image',
     hint: 'Nano Banana · stable',
     maxAttempts: 3,
@@ -46,21 +59,29 @@ export const MODELS: ModelOption[] = [
   },
 ]
 
-
 export const DEFAULT_MODEL = 'google/gemini-3.1-flash-image-preview'
 
 export function getModelConfig(value: string): ModelOption {
+  const direct = MODELS.find((m) => m.value === value || m.modelId === value)
+  if (direct) return direct
+
+  // Legacy OpenRouter slug without provider prefix
+  const withGoogle = `google/${value}`
+  const withOpenai = `openai/${value}`
   return (
-    MODELS.find((m) => m.value === value) ||
+    MODELS.find((m) => m.value === withGoogle || m.value === withOpenai) ||
     MODELS.find((m) => m.value === DEFAULT_MODEL) ||
     MODELS[0]
   )
 }
 
-export function skipsArtDirectorReview(value: string): boolean {
-  return value.toLowerCase().startsWith('openai/gpt-')
+export function getProviderForModel(value: string): AiProvider {
+  return getModelConfig(value).provider
 }
 
+export function skipsArtDirectorReview(value: string): boolean {
+  return getModelConfig(value).provider === 'openai'
+}
 
 export function maskKey(key: string): string {
   if (!key) return ''
@@ -71,4 +92,3 @@ export function maskKey(key: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 // Art styles — flat list with optional grouping for the dropdown
 // ─────────────────────────────────────────────────────────────────────────────
-

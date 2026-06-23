@@ -38,13 +38,36 @@ export type Candidate = {
 export const EXTENSION_PERCENT = 38
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OpenRouter integration — BYOK (bring your own key) for open-source friendliness
+// AI provider keys — BYOK (bring your own key) for open-source friendliness
 // ─────────────────────────────────────────────────────────────────────────────
 
-
+/** @deprecated Legacy single-key storage (OpenRouter). Migrated on first load. */
 export const STORAGE_KEY = 'extender:api_key'
 
+export const STORAGE_KEY_GOOGLE = 'extender:api_key_google'
+export const STORAGE_KEY_OPENAI = 'extender:api_key_openai'
+
 export const STORAGE_MODEL = 'extender:model'
+
+export type StoredApiKeys = {
+  google: string
+  openai: string
+}
+
+export function apiKeysPayload(keys: StoredApiKeys): {
+  apiKeys: { google?: string; openai?: string }
+} {
+  return {
+    apiKeys: {
+      ...(keys.google.trim() ? { google: keys.google.trim() } : {}),
+      ...(keys.openai.trim() ? { openai: keys.openai.trim() } : {}),
+    },
+  }
+}
+
+export function hasAnyStoredApiKey(keys: StoredApiKeys): boolean {
+  return !!(keys.google.trim() || keys.openai.trim())
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline icons — minimal SVG primitives, zero dependencies

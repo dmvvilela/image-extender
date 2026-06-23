@@ -11,9 +11,9 @@ import { TileStudio } from '@/app/components/TileStudio'
 import { TopBar } from '@/app/components/TopBar'
 import { ResultActions, VariantSelector } from '@/app/components/VariantSelector'
 import { Workspace } from '@/app/components/Workspace'
-import { Candidate, Direction, EXTENSION_PERCENT, Mode, STORAGE_KEY, STORAGE_MODE, STORAGE_MODEL } from '@/app/lib/app'
+import { Candidate, Direction, EXTENSION_PERCENT, Mode, STORAGE_KEY, STORAGE_KEY_GOOGLE, STORAGE_KEY_OPENAI, STORAGE_MODE, STORAGE_MODEL, StoredApiKeys, apiKeysPayload, hasAnyStoredApiKey } from '@/app/lib/app'
 import { findStyleLabel } from '@/app/lib/artStyles'
-import { DEFAULT_MODEL, MODELS, getModelConfig, skipsArtDirectorReview } from '@/app/lib/models'
+import { DEFAULT_MODEL, MODELS, getModelConfig, getProviderForModel, skipsArtDirectorReview } from '@/app/lib/models'
 import { LAYER_ORDER, LAYER_ROLES, LayerRole, PARALLAX_MAX_AUTO_STEPS, ParallaxLayer, WORKFLOW_ORDER, createDefaultLayers, getRecommendedLayerIndex, getWorkflowPrerequisite } from '@/app/lib/parallax'
 import { PROP_BATCH, PROP_BATCH_COLS, PROP_BATCH_H, PROP_BATCH_ROWS, PROP_BATCH_W, PROP_TILE_SIZE, PropItem, nextPropId, propAtlasLayout, resolvePropNames } from '@/app/lib/props'
 import { SPRITE_ANIMATIONS, SPRITE_FRAME_COUNT, SPRITE_FRAME_SIZE, SPRITE_GRID_COLS, SPRITE_GRID_ROWS, SPRITE_SHEET_H, SPRITE_SHEET_W, SPRITE_STRIP_H, SPRITE_STRIP_W, SpriteAnimType, SpriteFrame, SpriteSheet, createEmptySpriteSheet } from '@/app/lib/sprite'
@@ -190,7 +190,8 @@ export default function Home() {
 
   // BYOK: API key + model are persisted to localStorage. We start in a
   // "hydrating" state so we don't flash the modal before reading storage.
-  const [apiKey, setApiKey] = useState('')
+  const [apiKeys, setApiKeys] = useState<StoredApiKeys>({ google: '', openai: '' })
+  const [apiKeyModalProvider, setApiKeyModalProvider] = useState<'google' | 'openai'>('google')
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_MODEL)
   const skipArtDirectorReview = skipsArtDirectorReview(selectedModel)
   const [hydrated, setHydrated] = useState(false)
@@ -204,10 +205,20 @@ export default function Home() {
   // Hydrate from localStorage on mount, and decide whether to show the modal.
   useEffect(() => {
     try {
-      const k = localStorage.getItem(STORAGE_KEY) || ''
+      let google = localStorage.getItem(STORAGE_KEY_GOOGLE) || ''
+      let openai = localStorage.getItem(STORAGE_KEY_OPENAI) || ''
+      const legacy = localStorage.getItem(STORAGE_KEY) || ''
+      if (legacy && !google && !openai) {
+        if (legacy.startsWith('sk-') && !legacy.startsWith('sk-or-')) {
+          openai = legacy
+        } else if (!legacy.startsWith('sk-or-')) {
+          google = legacy
+        }
+        localStorage.removeItem(STORAGE_KEY)
+      }
       const m = localStorage.getItem(STORAGE_MODEL) || ''
       const savedMode = localStorage.getItem(STORAGE_MODE) || ''
-      setApiKey(k)
+      setApiKeys({ google, openai })
       if (m && MODELS.some((mm) => mm.value === m)) {
         setSelectedModel(m)
       }
@@ -220,12 +231,13 @@ export default function Home() {
       ) {
         setModeState(savedMode)
       }
-      if (!k) {
+      if (!hasAnyStoredApiKey({ google, openai })) {
+        setApiKeyModalProvider('google')
         setApiKeyRequired(true)
         setShowApiKeyModal(true)
       }
     } catch {
-      // localStorage unavailable (private mode, etc.) — show modal anyway.
+      setApiKeyModalProvider('google')
       setApiKeyRequired(true)
       setShowApiKeyModal(true)
     } finally {
@@ -245,10 +257,12 @@ export default function Home() {
   useEffect(() => {
     if (!hydrated) return
     try {
-      if (apiKey) localStorage.setItem(STORAGE_KEY, apiKey)
-      else localStorage.removeItem(STORAGE_KEY)
+      if (apiKeys.google) localStorage.setItem(STORAGE_KEY_GOOGLE, apiKeys.google)
+      else localStorage.removeItem(STORAGE_KEY_GOOGLE)
+      if (apiKeys.openai) localStorage.setItem(STORAGE_KEY_OPENAI, apiKeys.openai)
+      else localStorage.removeItem(STORAGE_KEY_OPENAI)
     } catch {}
-  }, [apiKey, hydrated])
+  }, [apiKeys, hydrated])
 
   useEffect(() => {
     if (!hydrated) return
@@ -257,31 +271,35 @@ export default function Home() {
     } catch {}
   }, [selectedModel, hydrated])
 
-  const handleSaveApiKey = (key: string) => {
-    setApiKey(key)
+  const handleSaveApiKey = (provider: 'google' | 'openai', key: string) => {
+    setApiKeys((prev) => ({ ...prev, [provider]: key }))
     setShowApiKeyModal(false)
     setApiKeyRequired(false)
   }
 
   const handleSkipApiKey = () => {
-    // User has env-set key on server; let them proceed without a client key.
     setShowApiKeyModal(false)
     setApiKeyRequired(false)
   }
 
-  const handleClearApiKey = () => {
-    setApiKey('')
+  const handleClearApiKey = (provider: 'google' | 'openai') => {
+    setApiKeys((prev) => ({ ...prev, [provider]: '' }))
   }
 
-  const handleEditApiKey = () => {
+  const handleEditApiKey = (provider: 'google' | 'openai') => {
+    setApiKeyModalProvider(provider)
     setApiKeyRequired(false)
     setShowApiKeyModal(true)
   }
 
+  const hasKeyForSelectedModel = (): boolean => {
+    const provider = getProviderForModel(selectedModel)
+    return provider === 'google' ? !!apiKeys.google.trim() : !!apiKeys.openai.trim()
+  }
+
   const ensureCanGenerate = (): boolean => {
-    // If no key and we're in required mode, re-open the modal instead of
-    // making a request that would fail with 401.
-    if (!apiKey && apiKeyRequired) {
+    if (!hasKeyForSelectedModel()) {
+      setApiKeyModalProvider(getProviderForModel(selectedModel))
       setShowApiKeyModal(true)
       return false
     }
@@ -519,7 +537,7 @@ export default function Home() {
           body: JSON.stringify({
             anchorPrompt: anchorPrompt.trim(),
             artStyle: artStyle !== 'none' ? artStyle : undefined,
-            apiKey: apiKey || undefined,
+            ...apiKeysPayload(apiKeys),
             model: selectedModel,
           }),
         })
@@ -537,7 +555,7 @@ export default function Home() {
         setSceneBriefLoading(false)
       }
     },
-    [apiKey, artStyle, selectedModel]
+    [apiKeys, artStyle, selectedModel]
   )
 
   const handleGenerateImage = async () => {
@@ -559,7 +577,7 @@ export default function Home() {
           width: generateWidth,
           height: generateHeight,
           artStyle: artStyle !== 'none' ? artStyle : undefined,
-          apiKey: apiKey || undefined,
+          ...apiKeysPayload(apiKeys),
           model: selectedModel,
           layerRole,
           sceneBrief:
@@ -636,7 +654,7 @@ export default function Home() {
             extensionAmount: EXTENSION_PERCENT,
             customPrompt: promptText.trim() || undefined,
             artStyle: style !== 'none' ? style : undefined,
-            apiKey: apiKey || undefined,
+            ...apiKeysPayload(apiKeys),
             model: selectedModel,
             layerRole,
             sceneBrief:
@@ -762,7 +780,7 @@ export default function Home() {
         }
       }
     },
-    [currentImageDimensions, debugMode, apiKey, selectedModel, mode, sceneBrief]
+    [currentImageDimensions, debugMode, apiKeys, selectedModel, mode, sceneBrief]
   )
 
   /**
@@ -1092,7 +1110,7 @@ export default function Home() {
           width: TILESET_TILE_SIZE,
           height: TILESET_TILE_SIZE,
           artStyle: artStyle !== 'none' ? artStyle : undefined,
-          apiKey: apiKey || undefined,
+          ...apiKeysPayload(apiKeys),
           model: selectedModel,
           tileMode: true,
           tileRole: role,
@@ -1291,7 +1309,7 @@ export default function Home() {
         body: JSON.stringify({
           prompt: tilePrompt,
           sceneBrief: sceneBrief.trim() ? sceneBrief.trim() : undefined,
-          apiKey: apiKey || undefined,
+          ...apiKeysPayload(apiKeys),
           previewImage,
           sheetImage: sheetImage || undefined,
         }),
@@ -1347,7 +1365,7 @@ export default function Home() {
           width: TILE_TEMPLATE_W,
           height: TILE_TEMPLATE_H,
           artStyle: artStyle !== 'none' ? artStyle : undefined,
-          apiKey: apiKey || undefined,
+          ...apiKeysPayload(apiKeys),
           model: selectedModel,
           tileSheet: true,
           tileGuideImage,
@@ -1910,7 +1928,7 @@ export default function Home() {
           prompt: propPrompt,
           sceneBrief: sceneBrief.trim() ? sceneBrief.trim() : undefined,
           artStyle: artStyle !== 'none' ? artStyle : undefined,
-          apiKey: apiKey || undefined,
+          ...apiKeysPayload(apiKeys),
           count,
           existing: propCategoriesOf(items),
         }),
@@ -2042,7 +2060,7 @@ export default function Home() {
           width: PROP_BATCH_W,
           height: PROP_BATCH_H,
           artStyle: artStyle !== 'none' ? artStyle : undefined,
-          apiKey: apiKey || undefined,
+          ...apiKeysPayload(apiKeys),
           model: selectedModel,
           propSheet: true,
           propCols: PROP_BATCH_COLS,
@@ -2166,7 +2184,7 @@ export default function Home() {
           width: PROP_TILE_SIZE,
           height: PROP_TILE_SIZE,
           artStyle: artStyle !== 'none' ? artStyle : undefined,
-          apiKey: apiKey || undefined,
+          ...apiKeysPayload(apiKeys),
           model: selectedModel,
           propMode: true,
           propRole: idea?.description,
@@ -2347,7 +2365,7 @@ export default function Home() {
         width: SPRITE_FRAME_SIZE,
         height: SPRITE_FRAME_SIZE,
         artStyle: artStyle !== 'none' ? artStyle : undefined,
-        apiKey: apiKey || undefined,
+        ...apiKeysPayload(apiKeys),
         model: selectedModel,
         spriteAnchor: true,
         spriteBodyPlan,
@@ -2408,7 +2426,7 @@ export default function Home() {
         width: SPRITE_SHEET_W,
         height: SPRITE_SHEET_H,
         artStyle: artStyle !== 'none' ? artStyle : undefined,
-        apiKey: apiKey || undefined,
+        ...apiKeysPayload(apiKeys),
         model: selectedModel,
         spriteSheet: true,
         spriteAnim,
@@ -2562,7 +2580,7 @@ export default function Home() {
           anim: spriteAnim,
           bodyPlan: spriteBodyPlan,
           sceneBrief: sceneBrief.trim() ? sceneBrief.trim() : undefined,
-          apiKey: apiKey || undefined,
+          ...apiKeysPayload(apiKeys),
           sheetImage,
           anchorImage: anchorImage || undefined,
         }),
@@ -4006,7 +4024,7 @@ export default function Home() {
         debugMode={debugMode}
         setDebugMode={setDebugMode}
         onGenerate={openGenerateModal}
-        apiKey={apiKey}
+        apiKeys={apiKeys}
         onEditApiKey={handleEditApiKey}
         onClearApiKey={handleClearApiKey}
         selectedModel={selectedModel}
@@ -4015,9 +4033,10 @@ export default function Home() {
 
       <ApiKeyModal
         open={showApiKeyModal}
-        initialValue={apiKey}
+        provider={apiKeyModalProvider}
+        initialValue={apiKeys[apiKeyModalProvider]}
         required={apiKeyRequired}
-        onSave={handleSaveApiKey}
+        onSave={(key) => handleSaveApiKey(apiKeyModalProvider, key)}
         onSkip={apiKeyRequired ? handleSkipApiKey : undefined}
         onClose={() => setShowApiKeyModal(false)}
       />

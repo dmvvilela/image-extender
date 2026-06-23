@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  apiKeyErrorResponse,
+  generateTextCompletion,
+  parseApiKeys,
+} from '@/app/lib/ai/text'
 
 // ART DIRECTOR — call #1 of the two-call props pipeline.
 //
@@ -9,7 +14,6 @@ import { NextRequest, NextResponse } from 'next/server'
 // from rendering (image) is what stops the "same loop" of lanterns/nests/pots:
 // a reasoning model can deliberately reach for fresh kinds, an image model
 // cannot.
-const DEFAULT_MODEL = 'google/gemini-2.0-flash-001'
 
 const artStyleDescriptions: Record<string, string> = {
   cinematic: 'cinematic photography with dramatic lighting and film grain',
@@ -41,9 +45,7 @@ interface PropIdea {
 function parseIdeas(raw: string): PropIdea[] {
   if (!raw) return []
   let text = raw.trim()
-  // Strip markdown code fences if present.
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
-  // Try direct parse, then a substring between the first [ and last ].
   const tryParse = (s: string): unknown => {
     try {
       return JSON.parse(s)
@@ -66,7 +68,6 @@ function parseIdeas(raw: string): PropIdea[] {
       data = tryParse(text.slice(objStart, objEnd + 1))
     }
   }
-  // Accept either a bare array or an object with a `props` array.
   const arr: unknown[] = Array.isArray(data)
     ? data
     : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).props)
@@ -97,27 +98,13 @@ function parseIdeas(raw: string): PropIdea[] {
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, sceneBrief, artStyle, apiKey, model, count, existing } =
-      await request.json()
+    const body = await request.json()
+    const { prompt, sceneBrief, artStyle, apiKey, count, existing } = body
+    const apiKeys = parseApiKeys(body)
 
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return NextResponse.json({ error: 'Missing biome prompt' }, { status: 400 })
     }
-
-    const openRouterKey =
-      typeof apiKey === 'string' && apiKey.trim()
-        ? apiKey.trim()
-        : process.env.OPENROUTER_API_KEY
-
-    if (!openRouterKey) {
-      return NextResponse.json(
-        { error: 'OpenRouter API key missing. Add one in Settings.' },
-        { status: 401 }
-      )
-    }
-
-    const modelId =
-      typeof model === 'string' && model.trim() ? model.trim() : DEFAULT_MODEL
 
     const n = Math.max(1, Math.min(24, Math.round(Number(count) || 8)))
     const existingList: string[] = Array.isArray(existing)
@@ -157,45 +144,14 @@ Output STRICT JSON only — no prose, no markdown fences. Schema:
 
 Propose ${n} brand-new decoration props as strict JSON.`
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openRouterKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': request.headers.get('referer') || 'http://localhost:3000',
-        'X-Title': 'AI Image Extender - Prop Art Director',
-      },
-      body: JSON.stringify({
-        model: modelId,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        max_tokens: 900,
-        // High temperature: this is the CREATIVE step. We want it reaching for
-        // novel kinds, not playing it safe.
-        temperature: 1.0,
-      }),
+    const raw = await generateTextCompletion({
+      apiKeys,
+      legacyApiKey: typeof apiKey === 'string' ? apiKey : undefined,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      maxOutputTokens: 900,
+      temperature: 1.0,
     })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json(
-        { error: errorData.error?.message || 'Failed to generate prop brief' },
-        { status: response.status }
-      )
-    }
-
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content
-    const raw =
-      typeof content === 'string'
-        ? content
-        : Array.isArray(content)
-          ? content
-              .map((p: { text?: string }) => (typeof p?.text === 'string' ? p.text : ''))
-              .join('')
-          : ''
 
     const ideas = parseIdeas(raw).slice(0, n)
     if (ideas.length === 0) {
@@ -207,6 +163,8 @@ Propose ${n} brand-new decoration props as strict JSON.`
 
     return NextResponse.json({ ideas })
   } catch (error) {
+    const keyResp = apiKeyErrorResponse(error)
+    if (keyResp) return keyResp
     console.error('Error in prop-brief route:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Internal server error' },
