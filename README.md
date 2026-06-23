@@ -401,7 +401,7 @@ Optional custom prompt and art style live in the bottom command bar.
 
 ## Tech stack
 
-- **[Next.js 14](https://nextjs.org/)** (App Router) + React 18 + TypeScript
+- **[Next.js 16](https://nextjs.org/)** (App Router) + React 19 + TypeScript
 - **[Tailwind CSS](https://tailwindcss.com/)** for the dark studio theme
 - **HTML Canvas** for all client-side image manipulation
   ([app/utils/imageProcessor.ts](app/utils/imageProcessor.ts))
