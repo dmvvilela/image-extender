@@ -1,5 +1,3 @@
-'use client'
-
 export type AiProvider = 'google' | 'openai'
 
 export type ModelOption = {
