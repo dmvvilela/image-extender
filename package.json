@@ -16,15 +16,15 @@
     "nextjs",
     "tailwindcss"
   ],
-  "author": "boona13",
+  "author": "boona13 (original), dmvvilela (fork)",
   "license": "MIT",
-  "homepage": "https://github.com/boona13/image-extender#readme",
+  "homepage": "https://github.com/dmvvilela/image-extender#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/boona13/image-extender.git"
+    "url": "https://github.com/dmvvilela/image-extender.git"
   },
   "bugs": {
-    "url": "https://github.com/boona13/image-extender/issues"
+    "url": "https://github.com/dmvvilela/image-extender/issues"
   },
   "scripts": {
     "dev": "next dev",
